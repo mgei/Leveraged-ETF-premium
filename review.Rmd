@@ -1,0 +1,97 @@
+---
+title: "Leveraged ETF premium"
+output: html_document
+---
+
+## Introduction
+
+This is a review of my Master's thesis from 2012 on leveraged ETF premium. 
+
+Here's the original abstract:
+
+> Leveraged exchange-traded funds (LETFs) that allow investors to over-proportionally participate in abstract markets, such as indices, are studied in this paper. LETFs are found to suffer from a performance lag (negative alpha). The lag is categorized in three ways: fund management fees, compounding effects, and a leverage premium. The leverage premium effect intensified during the recent financial crisis (2008/09). In accordance with the approach put forward by Frazzini and Pedersen [2011], various market neutral long/short trading strategies which are sought to exploit the LETF premium are found to have delivered positive abnormal returns over the past years. While these strategies are not necessarily replicable, they teach us a lot about the relation between risk and expected return of LETFs in general.
+
+## Review with R
+
+Hereafter I will review the results using R. The computations in my original thesis were performed using Matlab, but as I'm using R now and there are excellent packages for handling financial data (quantmod, tidyquant) as well as for graphical illustrations (ggplot2), I will be using R.
+
+First, let's load the packaged that we'll use and load the data from Yahoo Finance. We'll use monthly data for now, even though originally in the thesis daily data was used.
+
+
+```{r setup, message=FALSE}
+library(tidyverse)
+library(tidyquant)
+library(readxl)
+library(ggplot2)
+
+etfs <- read_excel("listofetfs.xls")
+
+# prices_d <- tq_get(etfs %>% filter(!terminated) %>% select(Ticker) %>% pull(),
+#                    get = "stock.prices",
+#                    from = "2000-01-01",
+#                    collapse = "monthly")
+# 
+# write_csv(prices_d, "prices_d.csv")
+# 
+# prices_m <- prices_d %>% 
+#   group_by(symbol) %>%
+#   tq_transmute(mutate_fun = to.monthly, indexAt = "lastof")
+# 
+# write_csv(prices_m, "prices_m.csv")
+# 
+# rm(prices_d)
+
+prices_m <- read_csv("prices_m.csv")
+
+```
+
+When loading the data from Yahoo Finance we get the error that two symbols are unnavailable: XIV and BGU. XIV was the short-volatility ETF from Credit Suisse that [was terminated in February 2018](https://www.zerohedge.com/news/2018-02-06/credit-suisse-terminates-xiv) after suffering tremendous losses due to spikes in market volatility. The ticker BGU was a tripple-long LETF from Direxion which has also been terminated since 2012.
+
+## Stylized facts
+
+Let's see how the leveraged ETFs have changed in terms of (total) expense ratio (ER).
+
+```{r expense}
+etfs %>% filter(!terminated) %>% 
+  ggplot() + 
+  geom_point(aes(x = ER_2012, y = ER_2018, color = as.factor(abs(Leverage))), size = 3, alpha = 0.8) + 
+  geom_abline(aes(intercept = 0, slope = 1), alpha = 0.2) +
+  theme_minimal() + labs(x = "ER 2012", y = "ER 2018", color = "Leverage", 
+                         title = "(Total) Expense Ratio in 2018 vs. 2012",
+                         subtitle = "Dots above the diagonal line represent LETFs that have become more expensive since 2012.",
+                         caption = "Data source: etfdb.com")
+```
+
+```{r availability}
+etfs %>% 
+  ggplot() +
+  geom_text(aes(x = as.factor(Leverage), y = Index, 
+                label = Ticker, color = Issuer, 
+                fontface = c("plain", "bold.italic")[terminated+1]), size = 3) +
+  theme_minimal() + labs(x = "Leverage factor", y = "Underlying Index", color = "Issuer", 
+                         title = "Availability of (L)ETFs per Underlying Index",
+                         subtitle = "Ticker symbol, in bold-italic the discontinued LETFs",
+                         caption = "Data source: etfdb.com")
+
+```
+
+It is quite remarkable, how ProShares and to some extreme extend Direxion are almost the only issuers of LETFs. Credit Suisse offered it's ETFs on the S&P500 volatility index (VIX), most notable the short-volatility XIV which suffered tremendous losses as volatility spiked in February 2018 and was [terminated shortly after](https://www.zerohedge.com/news/2018-02-06/credit-suisse-terminates-xiv).
+
+Let's look at data availability!
+
+```{r timeback}
+prices_m %>% group_by(symbol) %>% summarise(first = min(date), last = max(date), obs = n()) %>% 
+  left_join(etfs, by = c("symbol" = "Ticker")) %>% select(symbol, first, last, obs, Leverage) %>% 
+  ggplot() + 
+  geom_linerange(aes(x = reorder(symbol, obs), ymin = first, ymax = last, color = factor(abs(Leverage)))) + 
+  coord_flip() +
+  theme_minimal() + 
+  labs(y = "Availability", x = "Ticker symbol", color = "Leverage", 
+                         title = "Availability of (L)ETFs since",
+                         subtitle = "",
+                         caption = "Data source: etfdb.com, finance.yahoo.com") +
+  theme(axis.text=element_text(size=4))
+```
+
+
+Now let's investigate the popularity. For this we will look at the traded volume.
